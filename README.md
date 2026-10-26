@@ -63,7 +63,8 @@ Why: Elo gap 176 in Liverpool's favour · expected goals 1.9 v 0.8 · xG form Li
 
 - **Bot** is the bot's own view. **Market** is every bookie's odds with their margin taken out, averaged.
 - **Fair odds** are 1 divided by the bot's probability. **Best odds** are the highest price any bookie offers on each result.
-- **Value**: the edge is the bot's chance times the best odds, minus 1. +13% means a $1 bet would return $1.13 on average if the bot were right. Only edges of at least 5% get flagged (change this with `VALUE_EDGE`).
+- **Value**: the edge is the bot's chance times the best odds, minus 1. +13% means a $1 bet would return $1.13 on average if the bot were right. Only edges of at least 5% get flagged (`VALUE_EDGE`), and only when the bot gives that result at least 50% (`MIN_VALUE_CHANCE`) at odds of 3.00 or shorter (`MAX_VALUE_ODDS`). Long shots were where the bot's value bets lost most (14 to 18%).
+- **Line shopping** appears when one bookie's price beats the market's own view (every bookie's fair chances, averaged) by 5%+, on a result the market gives 40%+ at odds of 2.50 or shorter. It uses no model at all. It's logged as a separate paper bet.
 - **Heads-up** appears when the bot is 10+ points away from the market. In the Simulation Lab, when that happened the bookie's pick won 54% of the time and the bot's 50%.
 - **Goals, Half-time, Corners, Cards, Shots on target and Scorers** are the side markets (next section).
 
@@ -121,19 +122,29 @@ Set `BOT_TIMEZONE` (for example `Australia/Sydney`) to see kickoff times in your
 
 ## Paper trading
 
-Every final prediction with a value pick counts as a one-unit paper bet at the best price shown. About 10 minutes before kickoff the bot quietly records the closing odds. `python -m bot.scoreboard` then tells you four things, fastest signal first:
+Every final prediction with a value pick counts as a one-unit paper bet at the best price shown, and so does every line-shopping pick (tracked separately). About 10 minutes before kickoff the bot quietly records the closing odds. `python -m bot.scoreboard` then tells you four things, fastest signal first:
 
 1. **Price movement.** How often the odds the bot took were bigger than the closing odds. The closing odds are the market's final, best-informed guess, so beating them most of the time (say 55% or more over a few hundred picks) is the quickest sign of a real edge.
 2. **Bot vs market.** The same matches scored for the bot and for the market's view.
 3. **Accuracy.** How often the bot's favourite won, and how much chance it gave to the result that actually happened.
 4. **Profit.** Flat one-unit bets on every value pick. This is the noisiest of the four: even a genuinely good bettor can be down after 200 bets.
 
-**What to expect, from the Simulation Lab** (128,000 matches, 2007-08 to 2023-24, odds from a few days before kickoff): the bot's value picks lost about 8% at Bet365 prices and about 3% at the best price across 17 bookies. The only bets that made paper money were ones where the best price beat Bet365's own fair odds, and that worked just as well with no model at all (about +3.6% on 14,000 bets, before counting how hard those prices are to get in practice). If the bot ever has an edge, the likeliest place is the hour before kickoff, when confirmed lineups land and some bookies are slow to move. The closing-odds tracking is there to find out.
+**What to expect, from the Simulation Lab** (128,000 matches, 2007-08 to 2023-24, odds from a few days before kickoff): the bot's value picks lost about 8% at Bet365 prices and about 3% at the best price across 17 bookies. The only bets that made paper money were ones where the best price beat Bet365's own fair odds, and that worked just as well with no model at all (about +3.6% on 14,000 bets, before counting how hard those prices are to get in practice). **Walk-forward paper trades** (`python tests/papertrade.py`, about 35 seconds): every match in 22 leagues from 2005-06 to 2025-26, the model retrained before each season on earlier seasons only, betting at the best price across bookies a few days before kickoff. The rules were picked on 2005-06 to 2015-16, so 2016-17 on is the honest test:
+
+| Rule | 2016-17 to 2025-26 | Bets | Win rate | ROI |
+| --- | --- | --- | --- | --- |
+| Line shopping (no model) | all 22 leagues | 942 | 57% | +8.6% (95% range +2.4% to +14.8%) |
+| Bot value bets, new rule | all 22 leagues | 9,211 | 50% | -1.7% |
+| Bot value bets, new rule | Premier League | 592 | 54% | +0.4% (too few bets to tell from zero) |
+| Bot value bets, old rule (edge only) | all 22 leagues | 48,865 | 30% | -6.3% |
+
+Line shopping is the only rule that clearly made money, and it has nothing to do with the bot's predictions. Expect very few of those bets in the Premier League (about five a season), and in real life the best price is often gone, capped or only on offer from a bookie that limits winning accounts. If the bot ever has an edge, the likeliest place is the hour before kickoff, when confirmed lineups land and some bookies are slow to move. The closing-odds tracking is there to find out.
 
 ## How it was tested
 
 - `python tests/replay_test.py` trains the bot as if it were the end of 2024-25, then replays a sample of 2025-26 matchdays. It sets the clock to 50 minutes before kickoff, feeds the real starting XIs in as if they came from API-Football, and checks the live path gives the same features as the training path (every rating, xG form and star absence).
 - `python tests/live_shape_test.py` feeds the live client API-shaped data built from the archive and checks it parses everything the same way, including shots on target from saves.
+- `python tests/papertrade.py` paper-trades the betting rules on every past match with odds, walk-forward season by season (see Paper trading).
 - `python tests/odds_test.py` (run after the replay test) uses historical prices in place of The Odds API and checks the final post shows the market and the best odds, value picks get logged, and closing odds get recorded.
 
 None of the tests touch the live APIs, so the first real run is the final check. Run `python -m bot.run --dry-run` once before switching posting on.

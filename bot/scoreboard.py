@@ -81,6 +81,12 @@ def main():
         profit = np.where(res == settled.pick, settled.pick_odds - 1, -1.0)
         print(f"Paper bets: {len(settled)} settled, {(profit > 0).sum()} won, profit {profit.sum():+.2f} units "
               f"({profit.mean():+.1%} per bet).")
+    shops = finals[finals.shop_pick.notna()].merge(done[["fixture", "hg", "ag"]], on="fixture")
+    if len(shops):
+        res = np.select([shops.hg > shops.ag, shops.hg == shops.ag], ["home", "draw"], default="away")
+        profit = np.where(res == shops.shop_pick, shops.shop_odds - 1, -1.0)
+        print(f"Line-shopping bets: {len(shops)} settled, {(profit > 0).sum()} won, profit {profit.sum():+.2f} units "
+              f"({profit.mean():+.1%} per bet). Walk-forward tests made +8.6%, but expect only a few a season.")
     recent = done.tail(10).assign(score=[f"{h}-{a}" for h, a in zip(done.tail(10).hg, done.tail(10).ag)])
     print("\n" + recent[["home", "away", "p_home", "p_draw", "p_away", "mkt_home", "pick", "pick_odds", "score"]].to_string(index=False))
 

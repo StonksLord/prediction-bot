@@ -31,7 +31,7 @@ def all_leagues():
     m = pd.read_csv(path, low_memory=False, usecols=["Division", "MatchDate", "MatchTime", "HomeTeam", "AwayTeam", "FTHome", "FTAway",
                                                       "HTHome", "HTAway", "HomeTarget", "AwayTarget", "HomeCorners", "AwayCorners", "HomeYellow",
                                                       "AwayYellow", "HomeRed", "AwayRed", "OddHome", "OddDraw", "OddAway",
-                                                      "Over25", "Under25"])
+                                                      "MaxHome", "MaxDraw", "MaxAway", "Over25", "Under25"])
     m = m[m.Division.isin(LEAGUES)].dropna(subset=["FTHome", "FTAway"]).copy()
     key = lambda s: re.sub(r"[^a-z0-9]", "", s.strip().lower())
     names = pd.concat([m.HomeTeam, m.AwayTeam]).str.strip()
@@ -53,7 +53,7 @@ def all_leagues():
     m["hcd"], m["acd"] = (m.HomeYellow + m.HomeRed).astype(float), (m.AwayYellow + m.AwayRed).astype(float)
     m["hhg"], m["hag"] = m.HTHome.astype(float), m.HTAway.astype(float)
     return m[["league", "season", "kickoff", "fixture", "home", "away", "hg", "ag", "hst", "ast", "hc", "ac", "hcd", "acd", "hhg", "hag",
-              "OddHome", "OddDraw", "OddAway", "Over25", "Under25"]]
+              "OddHome", "OddDraw", "OddAway", "MaxHome", "MaxDraw", "MaxAway", "Over25", "Under25"]]
 
 
 def fpl_path(season, name):
@@ -129,15 +129,15 @@ def fpl_results(season):
 
 def all_matches(last):
     """Every league's results up to season `last`, with Premier League matches from 2019-20 on taken from
-    Fantasy Premier League (the same source the live bot uses), plus Bet365's Premier League odds."""
+    Fantasy Premier League (the same source the live bot uses), plus Bet365's and the best Premier League odds."""
     arch = all_leagues()
     e0 = arch[arch.league == "E0"].drop_duplicates(["season", "home", "away"])
-    odds = e0[["season", "home", "away", "OddHome", "OddDraw", "OddAway", "Over25", "Under25"]]
+    odds = e0[["season", "home", "away", "OddHome", "OddDraw", "OddAway", "MaxHome", "MaxDraw", "MaxAway", "Over25", "Under25"]]
     arch = arch[(arch.season <= last) & ~((arch.league == "E0") & (arch.season >= FIRST_FPL_SEASON))]
     fpl = [fpl_results(s) for s in fpl_seasons() if s <= last]
     if fpl:  # corners and half-time scores aren't in Fantasy Premier League: take them from the archive
         fpl = [f.merge(e0[["season", "home", "away", "hc", "ac", "hhg", "hag"]], on=["season", "home", "away"], how="left") for f in fpl]
-    results = pd.concat([arch.drop(columns=["OddHome", "OddDraw", "OddAway", "Over25", "Under25"])] + fpl, ignore_index=True)
+    results = pd.concat([arch.drop(columns=["OddHome", "OddDraw", "OddAway", "MaxHome", "MaxDraw", "MaxAway", "Over25", "Under25"])] + fpl, ignore_index=True)
     results = results.sort_values(["kickoff", "league", "home"], kind="stable").reset_index(drop=True)
     return results, odds
 

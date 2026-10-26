@@ -23,6 +23,11 @@ ODDS_REGIONS = os.environ.get("ODDS_REGIONS", "au,uk,eu")  # each region costs o
 
 # Paper trading
 VALUE_EDGE = float(os.environ.get("VALUE_EDGE", "0.05"))  # only flag a bet when the bot's price beats the best odds by this much
+MIN_VALUE_CHANCE = float(os.environ.get("MIN_VALUE_CHANCE", "0.5"))  # ...and the bot gives that result at least this chance
+MAX_VALUE_ODDS = float(os.environ.get("MAX_VALUE_ODDS", "3.0"))      # ...at odds no longer than this (long shots lost 14-18%)
+# Line shopping: back the market's own view when one bookie's price beats it. No model involved. The only rule that
+# made money walk-forward (tests/papertrade.py): chosen on 2005-16, then +8.6% on 942 bets in 2016-26 at the best price.
+SHOP_EDGE, SHOP_MIN_CHANCE, SHOP_MAX_ODDS = 0.05, 0.4, 2.5
 CLOSING_WINDOW_MINUTES = 15  # record the closing odds in the last run before kickoff
 
 # Where predictions get posted (set whichever you use)

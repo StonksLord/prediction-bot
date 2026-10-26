@@ -6,6 +6,7 @@ Each run:
 3. From 75 minutes before kickoff, looks for confirmed lineups and posts the final prediction.
    No lineups 20 minutes before kickoff: posts the final prediction with the expected XI instead.
    The final prediction is also the paper bet: if the bot's price beats the best odds by VALUE_EDGE, it's logged.
+   Alongside it, a line-shopping paper bet: the market's own view against the best price, no model involved.
 4. In the last run before kickoff, records the closing odds (no post), so you can see whether the
    market moved towards the bot's picks.
 
@@ -21,7 +22,8 @@ import pandas as pd
 
 from . import markets, players
 from .config import (CLOSING_WINDOW_MINUTES, LAST_CALL_MINUTES, LINEUP_LOOKBACK, LINEUP_WINDOW_MINUTES, LOG_PATH,
-                     MARKETS_LOG_PATH, MODEL_PATH, PREVIEW_HOURS, STAR_THRESHOLD, STATE_PATH, VALUE_EDGE)
+                     MARKETS_LOG_PATH, MAX_VALUE_ODDS, MIN_VALUE_CHANCE, MODEL_PATH, PREVIEW_HOURS, SHOP_EDGE,
+                     SHOP_MAX_ODDS, SHOP_MIN_CHANCE, STAR_THRESHOLD, STATE_PATH, VALUE_EDGE)
 from .model import load_json, predict_full
 from .post import post
 from .ratings import LeagueState
@@ -33,7 +35,7 @@ FEATURE_COLUMNS = ["elo_diff", "pi_diff", "goal_ratio", "goal_total", "shot_gap"
 LOG_COLUMNS = (["logged_at", "stage", "lineups", "fixture", "kickoff", "home", "away", "p_home", "p_draw", "p_away"]
                + FEATURE_COLUMNS + ["missing_home", "missing_away", "mkt_home", "mkt_draw", "mkt_away",
                                     "best_home", "best_draw", "best_away", "book_home", "book_draw", "book_away",
-                                    "pick", "pick_odds", "pick_edge"])
+                                    "pick", "pick_odds", "pick_edge", "shop_pick", "shop_odds", "shop_edge"])
 SIDES = ["home", "draw", "away"]
 DISAGREE = 0.10  # in the Simulation Lab, when the bot and the bookie differed by 10+ points the bookie's pick won more often
 
@@ -116,13 +118,21 @@ def side_features(team, squad, hist, table, kickoff, carry_in, lineup_names=None
             "source": source, "missing": missing, "starters": list(starters)}
 
 
-def value_pick(probs, best):
-    """The outcome where the bot's chance times the best odds beats 1 by the most, if by at least VALUE_EDGE."""
-    if not best:
+def value_pick(probs, best, edge=VALUE_EDGE, min_chance=MIN_VALUE_CHANCE, max_odds=MAX_VALUE_ODDS):
+    """The outcome where the chance times the best odds beats 1 by the most, if by at least `edge`, with at least
+    `min_chance` and at odds no longer than `max_odds`."""
+    if not probs or not best:
         return None
     edges = {s: probs[s] * best[s][0] - 1 for s in SIDES}
     side = max(edges, key=edges.get)
-    return (side, best[side][0], best[side][1], edges[side]) if edges[side] >= VALUE_EDGE else None
+    ok = edges[side] >= edge and probs[side] >= min_chance and best[side][0] <= max_odds
+    return (side, best[side][0], best[side][1], edges[side]) if ok else None
+
+
+def shop_pick(odds):
+    """Line shopping: the market's own chances against the best price."""
+    odds = odds or {}
+    return value_pick(odds.get("market"), odds.get("best"), SHOP_EDGE, SHOP_MIN_CHANCE, SHOP_MAX_ODDS)
 
 
 def when(kickoff):
@@ -148,7 +158,7 @@ def market_lines(f, mk, scores, scorers):
     return lines
 
 
-def describe(f, probs, feats, sides, stage, odds=None, pick=None, extra=None):
+def describe(f, probs, feats, sides, stage, odds=None, pick=None, extra=None, shop=None):
     label = {"preview": "Preview, expected XIs",
              "final": "Final, lineups confirmed" if all(s["source"] == "confirmed" for s in sides.values())
              else "Final, expected XIs (no confirmed lineups yet)"}[stage]
@@ -175,6 +185,8 @@ def describe(f, probs, feats, sides, stage, odds=None, pick=None, extra=None):
         names = {"home": f.home, "draw": "the draw", "away": f.away}
         lines.append(f"Value: {names[pick[0]]} at {pick[1]:.2f} with {pick[2]} (edge {pick[3]:+.0%})" if pick
                      else "Value: none at these prices")
+        if shop:
+            lines.append(f"Line shopping: {names[shop[0]]} at {shop[1]:.2f} with {shop[2]} beats the market's own view by {shop[3]:+.0%}")
     if market:
         gap = max(abs(probs[s] - market[s]) for s in SIDES)
         if gap >= DISAGREE:
@@ -274,9 +286,9 @@ def main(dry_run=False, now=None, src=None, lineups_api=None, odds_api=None):
         mu_tonight = {f.home: mk["goals_exp_home"], f.away: mk["goals_exp_away"]}
         scorers = likely_scorers(model, state, hist, squads, f, sides, mu_tonight, past_mu[past_mu.kickoff < f.kickoff])
         odds = get_odds(f)
-        pick = value_pick(probs, (odds or {}).get("best"))
+        pick, shop = value_pick(probs, (odds or {}).get("best")), shop_pick(odds)
         extra = market_lines(f, mk, markets.top_scores(grid[0]), scorers)
-        post(describe(f, probs, feats, sides, stage, odds, pick, extra), dry_run=dry_run)
+        post(describe(f, probs, feats, sides, stage, odds, pick, extra, shop), dry_run=dry_run)
         market_rows.append({"logged_at": now.isoformat(timespec="seconds"), "stage": stage, "fixture": f.fixture,
                             "kickoff": f.kickoff.isoformat(), "home": f.home, "away": f.away,
                             **{k: round(v, 4) for k, v in mk.items()},
@@ -290,7 +302,8 @@ def main(dry_run=False, now=None, src=None, lineups_api=None, odds_api=None):
                      "missing_home": "; ".join(sides[f.home]["missing"].get("web_name", pd.Series(dtype=str)).head(5)),
                      "missing_away": "; ".join(sides[f.away]["missing"].get("web_name", pd.Series(dtype=str)).head(5)),
                      **odds_fields(odds),
-                     **({"pick": pick[0], "pick_odds": pick[1], "pick_edge": round(pick[3], 4)} if pick and stage == "final" else {})})
+                     **({"pick": pick[0], "pick_odds": pick[1], "pick_edge": round(pick[3], 4)} if pick and stage == "final" else {}),
+                     **({"shop_pick": shop[0], "shop_odds": shop[1], "shop_edge": round(shop[3], 4)} if shop and stage == "final" else {})})
     if odds_api.enabled() and odds_api.remaining is not None:
         print(f"The Odds API credits left this month: {odds_api.remaining}")
     if rows and not dry_run:
