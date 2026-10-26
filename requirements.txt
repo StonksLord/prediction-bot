@@ -1,0 +1,6 @@
+numpy>=1.26
+pandas>=2.2
+requests>=2.31
+scikit-learn>=1.4
+scipy>=1.10
+tzdata>=2024.1
